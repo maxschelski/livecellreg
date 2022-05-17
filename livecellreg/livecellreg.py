@@ -174,11 +174,11 @@ def extract_imgs_from_multipage(path, image_name):
 
     (data_dict, img_width, 
      img_height, meta_data) = get_image_properties(image_path)
-
+    
     input_image = move_xy_axes_in_img_to_last_dimensions(input_image, 
                                                          img_width, 
                                                          img_height)
-    # expand dimensions to always have z dimension
+    # expand dimensions to always have z dimension included as well
     if len(input_image.shape) == 2:
         input_image = np.expand_dims(input_image, 0)
 
@@ -415,11 +415,6 @@ def get_translations(input_image_array, step_size_shift):
             if len(np.unique(input_image)) > 1:
                 is_first_nonzero_image = False
                 reference_image = input_image
-                # reference_image = get_normalized_image(input_image, 
-                #                                     np.mean(input_image))
-                std_reference = np.std(reference_image)
-                maxNumberOfCorrelationRounds = int(np.round(reference_image.shape[0]/2 / 
-                                                            step_size_shift,0))
             elif frame_nb > 0:
                 all_shifts.append([0,0,0])
             continue
@@ -444,10 +439,7 @@ def get_translations(input_image_array, step_size_shift):
                                                               last_z_shift,
                                                               step_size_shift,
                                                               reference_image, 
-                                                              std_reference,
-                                                              correlation_values_last_shift,
-                                                              input_image_mean,
-                                                              std_input_image)
+                                                              correlation_values_last_shift)
 
 
         (x_shift, 
@@ -492,9 +484,7 @@ def get_translations(input_image_array, step_size_shift):
 def get_initial_shift_for_image(input_image, 
                                 last_x_shift, last_y_shift, last_z_shift,
                                 step_size_shift,
-                                reference_image, std_reference,
-                                correlation_values_last_shift,
-                                input_image_mean,std_input_image):
+                                reference_image, correlation_values_last_shift):
     # number of STD that the correlation value of an image with the last shift
     # needs to be different to be considered an outlier, which leads
     # to a larger range of shift values to be tried out and the reference
@@ -544,9 +534,9 @@ def get_initial_shift_for_image(input_image,
                                                      std_correlation_values)
     
     step_size_shift_tmp = step_size_shift
-    correlation_value_array = np.zeros((step_size_shift_tmp*2 + 1, 
-                                        step_size_shift_tmp*2 + 1,
-                                        step_size_shift_tmp*2 + 1))
+    correlation_value_array = get_correlation_value_array(step_size_shift_tmp,  
+                                                          input_image)
+
     last_step_size_shift_tmp = step_size_shift_tmp
     
     # save initial correlation values (at last shift)
@@ -574,9 +564,9 @@ def get_initial_shift_for_image(input_image,
         # for each iteration calculate a new correlation value matrix
         # since the step_size_shift is expanded for each iteration
         # the array gets bigger as well
-        correlation_value_array_new = np.zeros((step_size_shift_tmp*2 + 1, 
-                                                step_size_shift_tmp*2 + 1,
-                                                step_size_shift_tmp*2 + 1))
+        correlation_value_array_new = get_correlation_value_array(step_size_shift_tmp,  
+                                                                  input_image)
+        
         # incorporate previous (smaller) array into new (larger) array
         correlation_value_array = put_smaller_in_mid_of_larger_array(correlation_value_array,
                                                                      correlation_value_array_new)
@@ -597,6 +587,9 @@ def get_initial_shift_for_image(input_image,
 
         # try shifts lower and higher than the last shift in both directions
         for x_shift, y_shift, z_shift in all_shifts:
+            # do not try z shifts that would move out of the dimension
+            if z_shift >= input_image.shape[0]:
+                continue
             shifted_reference = shifted_references[z_shift]["image"]
             std_reference = shifted_references[z_shift]["std"]
             input_image_mean = shifted_input_image_stats[z_shift]["mean"]
@@ -657,12 +650,24 @@ def get_initial_shift_for_image(input_image,
      y_shift_change,
      z_shift_change) = get_initial_shift_refinings(best_correlation, 
                                                    step_size_shift)
+                          
+    # if there is only one value in the z dimension, do not refine z shift
+    if input_image.shape[0] == 1:
+        z_shift_change = 0
     
     return (x_shift, y_shift, z_shift,
             x_shift_change, y_shift_change, z_shift_change,
             best_correlation_value, correlation_values_last_shift,
             get_new_reference_image, shifted_references,
             shifted_input_image_stats)
+
+def get_correlation_value_array(step_size_shift_tmp,  input_image):
+    image_shape = input_image.shape
+    z_dimension = min(image_shape[0], step_size_shift_tmp*2 + 1)
+    correlation_value_array = np.zeros((step_size_shift_tmp*2 + 1, 
+                                        step_size_shift_tmp*2 + 1,
+                                        z_dimension))
+    return correlation_value_array
 
 def get_std_diff_of_correlation(correlation_value, mean_correlation_values,
                                 std_correlation_values):
@@ -777,7 +782,12 @@ def refine_shift_values(input_image,
         if refine_y_shift:
             y_shifts.append(y_shift + y_shift_change)
         if refine_z_shift:
-            z_shifts.append(z_shift + z_shift_change)
+            new_z_shift = z_shift + z_shift_change
+            # only add new z_shift, if it does not move out of the z dimension
+            if abs(new_z_shift) < input_image.shape[0]:
+                z_shifts.append(new_z_shift)
+            else:
+                refine_z_shift = False
 
         best_x_shift = x_shift
         best_y_shift = y_shift
