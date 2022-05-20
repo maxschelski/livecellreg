@@ -569,7 +569,6 @@ def get_initial_shift_for_image(input_image,
     while not good_correlation_found:
         # at the beginning of each loop check whether the difference in stds
         # from the mean is smaller than the defined threshold
-        print(difference_in_stds)
         if ((difference_in_stds > threshold_std_difference) & 
             (len(correlation_values_last_shift) > 2)):
             step_size_shift_tmp += 1
@@ -656,9 +655,6 @@ def get_initial_shift_for_image(input_image,
             no_translation_found = True
             break
         
-    print("\n\n")
-    print(np.max(correlation_value_array))
-    print(correlation_value_array)
     if no_translation_found:
         x_shift = np.nan
         y_shift = np.nan
@@ -709,11 +705,6 @@ def get_initial_shift_for_image(input_image,
         # if there is only one value in the z dimension, do not refine z shift
         if input_image.shape[0] == 1:
             z_shift_change = 0
-        
-        print(step_size_shift, correlation_value_array.shape,
-              best_correlation,x_shift_change,
-         y_shift_change)
-        print(x_shift, y_shift)
     
     return (x_shift, y_shift, z_shift,
             x_shift_change, y_shift_change, z_shift_change,
@@ -838,8 +829,6 @@ def refine_shift_values(input_image,
         refine_z_shift = True
         
     while refine_x_shift | refine_y_shift | refine_z_shift:
-        print(refine_x_shift, refine_y_shift)
-        print(x_shift, y_shift)
         #save all x_shifts & y_shifts to be tested
         x_shifts = []
         x_shifts.append(x_shift)
@@ -893,10 +882,8 @@ def refine_shift_values(input_image,
                                                                  input_image_mean, 
                                                                  shifted_reference, 
                                                                  std_reference)
-            print(best_correlation_value, correlation_value_test)
             #check if the new correlation_value is larger than the best so far
             if correlation_value_test > best_correlation_value:
-                print("NEW BEST CORRELATION FOUND!")
                 #update best correlation value
                 best_correlation_value = correlation_value_test
                 #save shifts for best correlation value in tmp vars
