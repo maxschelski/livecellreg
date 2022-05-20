@@ -53,7 +53,7 @@ images_in_sorted_folder = False
 choose_folder_manually = False
 force_multipage_save = False
 only_register_multipage_tiffs = True
-overwrite_registered_images = False
+overwrite_registered_images = True
 start_reg_from_last_img = False
 
 remove_zero_images = True
