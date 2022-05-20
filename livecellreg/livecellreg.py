@@ -53,10 +53,19 @@ images_in_sorted_folder = False
 choose_folder_manually = False
 force_multipage_save = False
 only_register_multipage_tiffs = True
-overwrite_registered_images = True
+overwrite_registered_images = False
 start_reg_from_last_img = False
 
 remove_zero_images = True
+
+# maximum shift in pixels which is allowed
+# beyond this shift, the image will be replaced with a zero image
+max_shift = 150
+# if no translation could be found within the allowed max shift
+# this happens e.g. if the position scan at the
+# microscope ended up at the wrong cell), replace images with zero image
+# if False, the untranslated image will be kept
+replace_not_translated_images_with_zeros = True
 
 # parameters for removing out of focus images
 # this feature might not always work properly
@@ -370,7 +379,7 @@ def cut_image_based_on_z_shift(image, z_shift):
         image = image[:z_shift,:,:]
     return image
 
-def get_translations(input_image_array, step_size_shift):
+def get_translations(input_image_array, step_size_shift, max_shift):
     all_shifts = []
     is_first_nonzero_image = True
     last_x_shift = 0
@@ -443,8 +452,12 @@ def get_translations(input_image_array, step_size_shift):
                                                               last_y_shift,
                                                               last_z_shift,
                                                               step_size_shift,
+                                                              max_shift,
                                                               reference_image, 
                                                               correlation_values_last_shift)
+        if np.isnan(x_shift):
+            all_shifts.append([np.nan,np.nan,np.nan])              
+            continue
 
         (x_shift, 
          y_shift, 
@@ -487,13 +500,13 @@ def get_translations(input_image_array, step_size_shift):
 
 def get_initial_shift_for_image(input_image, 
                                 last_x_shift, last_y_shift, last_z_shift,
-                                step_size_shift,
+                                step_size_shift,max_shift,
                                 reference_image, correlation_values_last_shift):
     # number of STD that the correlation value of an image with the last shift
     # needs to be different to be considered an outlier, which leads
     # to a larger range of shift values to be tried out and the reference
     # image to be updated
-    threshold_std_difference = 5
+    threshold_std_difference = 7
     
     # POTENTIAL ISSUES FOR LARGE SHIFTS:
     # shifting too far could cause problems due to rolling of image 
@@ -553,6 +566,7 @@ def get_initial_shift_for_image(input_image,
     # (since not enough correlation values present to calculate STD)
     good_correlation_found = False
     get_new_reference_image = False
+    no_translation_found = False
     while not good_correlation_found:
         # at the beginning of each loop check whether the difference in stds
         # from the mean is smaller than the defined threshold
@@ -638,48 +652,61 @@ def get_initial_shift_for_image(input_image,
                                                          mean_correlation_values,
                                                          std_correlation_values)
         last_step_size_shift_tmp = step_size_shift_tmp
+        
+        if (step_size_shift_tmp*2) > max_shift:
+            no_translation_found = True
+            break
+        
+    if no_translation_found:
+        x_shift = np.nan
+        y_shift = np.nan
+        z_shift = np.nan
+        x_shift_change = np.nan
+        y_shift_change = np.nan
+        z_shift_change = np.nan
+        
+    else:
+        #get the position of the best correlation value in matrix
+        best_correlation = np.where(correlation_value_array == 
+                                    best_correlation_value)
+        
+        # TODO:
+        # what if there are two shift values with 
+        # exactly the same correlation values?
+        # does this ever happen?
+        # direction to follow up on would be wrong;
+        # this would also be a problem for refining the shift values
     
-    #get the position of the best correlation value in matrix
-    best_correlation = np.where(correlation_value_array == 
-                                best_correlation_value)
-    
-    # TODO:
-    # what if there are two shift values with 
-    # exactly the same correlation values?
-    # does this ever happen?
-    # direction to follow up on would be wrong;
-    # this would also be a problem for refining the shift values
-
-    #calculate corresponding shifts by starting from lastshifts
-    if array_shape[0] > 1:
-        x_shift = rel_to_abs_shift(best_correlation[0][0],
-                                   step_size_shift_tmp,
-                                   last_x_shift)
-    else:
-        x_shift = last_x_shift
-        
-    if array_shape[1] > 1:
-        y_shift = rel_to_abs_shift(best_correlation[1][0],
-                                   step_size_shift_tmp,
-                                   last_y_shift)
-    else:
-        y_shift = last_y_shift
-        
-    if array_shape[2] > 1:
-        z_shift = rel_to_abs_shift(best_correlation[2][0],
-                                   step_size_shift_tmp,
-                                   last_z_shift)
-    else:
-        z_shift = last_z_shift
-        
-    (x_shift_change,
-     y_shift_change,
-     z_shift_change) = get_initial_shift_refinings(best_correlation, 
-                                                   step_size_shift)
-                          
-    # if there is only one value in the z dimension, do not refine z shift
-    if input_image.shape[0] == 1:
-        z_shift_change = 0
+        #calculate corresponding shifts by starting from lastshifts
+        if array_shape[0] > 1:
+            x_shift = rel_to_abs_shift(best_correlation[0][0],
+                                       step_size_shift_tmp,
+                                       last_x_shift)
+        else:
+            x_shift = last_x_shift
+            
+        if array_shape[1] > 1:
+            y_shift = rel_to_abs_shift(best_correlation[1][0],
+                                       step_size_shift_tmp,
+                                       last_y_shift)
+        else:
+            y_shift = last_y_shift
+            
+        if array_shape[2] > 1:
+            z_shift = rel_to_abs_shift(best_correlation[2][0],
+                                       step_size_shift_tmp,
+                                       last_z_shift)
+        else:
+            z_shift = last_z_shift
+            
+        (x_shift_change,
+         y_shift_change,
+         z_shift_change) = get_initial_shift_refinings(best_correlation, 
+                                                       step_size_shift)
+                              
+        # if there is only one value in the z dimension, do not refine z shift
+        if input_image.shape[0] == 1:
+            z_shift_change = 0
     
     return (x_shift, y_shift, z_shift,
             x_shift_change, y_shift_change, z_shift_change,
@@ -931,20 +958,33 @@ def translate_images(all_translations,image_array,image_name_array,
         x_shift = all_translations[a][0]
         y_shift = all_translations[a][1]
         z_shift = all_translations[a][2]
-        translated_image = np.roll(image,(z_shift,x_shift,y_shift),
-                                   axis=(0,2,1))
-        if x_shift > 0:
-            translated_image[:,:,:x_shift] = 0
-        if x_shift < 0:
-            translated_image[:,:,x_shift:] = 0
-        if y_shift > 0:
-            translated_image[:,:y_shift,:] = 0
-        if y_shift < 0:
-            translated_image[:,y_shift:,:] = 0
-        if z_shift > 0:
-            translated_image[:z_shift,:,:] = 0
-        if z_shift < 0:
-            translated_image[z_shift:,:,:] = 0
+        # replace images where no translation was found with zero image
+        replace_with_zero_image = False
+        if np.isnan(x_shift):
+            if replace_not_translated_images_with_zeros:
+                replace_with_zero_image = True
+            # if no translation was found, replace values with 0
+            # to allow the translation by 0 (no translation)
+            # instead of by nan
+            x_shift, y_shift, z_shift = (0,0,0)
+                
+        if replace_with_zero_image:
+            translated_image = np.zeros_like(image)
+        else:
+            translated_image = np.roll(image,(z_shift,x_shift,y_shift),
+                                       axis=(0,2,1))
+            if x_shift > 0:
+                translated_image[:,:,:x_shift] = 0
+            if x_shift < 0:
+                translated_image[:,:,x_shift:] = 0
+            if y_shift > 0:
+                translated_image[:,:y_shift,:] = 0
+            if y_shift < 0:
+                translated_image[:,y_shift:,:] = 0
+            if z_shift > 0:
+                translated_image[:z_shift,:,:] = 0
+            if z_shift < 0:
+                translated_image[z_shift:,:,:] = 0
 
         #only save single images if they should not be saved as multipage images
         if not save_as_multipage:
@@ -977,6 +1017,7 @@ def check_whether_file_name_is_allowed(file_name, file_name_inclusions,
         return False
 
 def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
+                              max_shift,
                               current_nb, file_name_inclusions, 
                               file_name_exclusions,
                               force_multipage_save = False) :
@@ -1083,7 +1124,8 @@ def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
             if channel != reference_channel:
                 continue
             all_translations = get_translations(image_arrays[nb], 
-                                              step_size_shift)
+                                              step_size_shift,
+                                              max_shift)
 
 
         registered_images_array_all_channels = []
@@ -1137,6 +1179,7 @@ def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
     return current_nb
 
 def goDeeper(props,this_path, a, max_a, conditions, folders, step_size_shift,
+             max_shift,
              current_nb, file_name_inclusions, file_name_exclusions, 
              force_multipag_save):
     a += 1
@@ -1158,6 +1201,7 @@ def goDeeper(props,this_path, a, max_a, conditions, folders, step_size_shift,
                 current_nb = translate_cells_in_folder(path_new, 
                                                        props_new["date"], 
                                                        step_size_shift, 
+                                                       max_shift,
                                                        current_nb,
                                                        file_name_inclusions, 
                                                        file_name_exclusions,
@@ -1166,18 +1210,20 @@ def goDeeper(props,this_path, a, max_a, conditions, folders, step_size_shift,
             if os.path.isdir(path_new):
                 current_nb = goDeeper(props_new, path_new, a, max_a,
                                       conditions,folders, step_size_shift,
+                                      max_shift,
                                      current_nb, 
                                      file_name_inclusions, file_name_exclusions,
                                      force_multipag_save)
                 
 
-def traverseFolders(input_path, folders, conditions, step_size_shift,
+def traverseFolders(input_path, folders, conditions, step_size_shift,max_shift,
                     current_nb, file_name_inclusions, file_name_exclusions, 
                     force_multipag_save,
                     ):
     props = {}
     nb = 0
-    goDeeper(props,input_path,0,len(folders),conditions,folders, step_size_shift,
+    goDeeper(props,input_path,0,len(folders),conditions,folders, 
+             step_size_shift,max_shift,
              current_nb, file_name_inclusions, file_name_exclusions, 
              force_multipag_save)
     
@@ -1204,11 +1250,11 @@ if choose_folder_manually:
 
             current_nb = 0
             translate_cells_in_folder(collection_folder, "unknown", 
-                                   step_size_shift, current_nb, 
+                                   step_size_shift,max_shift, current_nb, 
                                    file_name_inclusions, file_name_exclusions,
                                    force_multipage_save = force_multipage_save)
 
 else:
-    traverseFolders(input_path, folders,conditions, step_size_shift,
+    traverseFolders(input_path, folders,conditions, step_size_shift,max_shift,
                     current_nb, file_name_inclusions, file_name_exclusions,
                     force_multipage_save)
