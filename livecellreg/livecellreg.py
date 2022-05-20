@@ -36,20 +36,6 @@ import math
 #in multi dimensional alignment value matrix then exclude ids where best alignment is not at the border
 #continue with remaining array until no id is left
 
-#how to solve the problem of huge shifts in a short time interval?
-#if it is over a few frames, reduce number of times that the same reference image is used
-#if it is from one timeframe to the next:
-#create mask of reference image and new timeframe
-#check overlap of the two masks relative to the smaller of the two masks
-#if it is below X % (50?) move masks somehow to get above this threshold
-#maybe move it based on centroid of image?
-#for that first make size of both masks similar in each dimension:
-#recursively: check centroid, cut in each dimension a few percent
-#(not of are but of coordinates), restart
-#something like this might be necessary, since
-# after a big step of movement, some part of the cell might be cut off, shifting the centroid
-#is there a more clever algorithm to still get the middle point? hmmm...
-
 
 #is it possible to create an ML algorithm that detects neurites
 #by using the algorithm I coded for automated analysis?
@@ -57,19 +43,27 @@ import math
 
 
 
-collection_folder = "E:\\TUBB\\MT-RF_longterm\\CAMS3-longterm\\cytosol_40x\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\LatA10-FRB-Dync1h1m-C2-TE\\"
 #Choose the channel with an as much as possible non-changing intracellular localization
 #signals that accumulate at a certain place or are excluded from a from a place
 #over time are not going to work very well
 reference_channel = "c0000"
 date = "2204"
 images_in_sorted_folder = False
-choose_folder_manually = True
+choose_folder_manually = False
 force_multipage_save = False
-start_reg_from_last_img = False
-only_delete_out_of_focus_at_end = False
-overwrite_registered_images = True
 only_register_multipage_tiffs = True
+overwrite_registered_images = True
+start_reg_from_last_img = False
+
+remove_zero_images = True
+
+# parameters for removing out of focus images
+# this feature might not always work properly
+# will output csv file with all frames that were removed
+# check that file for some movies to make sure the feature works reliably
+remove_out_of_focus_images = False
+only_delete_out_of_focus_at_end = False
 nb_empty_frames_instead_of_out_of_focus_frames = 0
 
 processes = 1
@@ -77,6 +71,17 @@ process = 1
 background_val = 200
 
 
+folders = ["date"]
+conditions = [""]
+# define strings that need to be present in file name, one needs to be present
+# for the file to be used
+file_name_inclusions = [""]
+# define strings that must not be present in file name, one of them present
+# will exclude the file
+file_name_exclusions = ["Cer"]
+
+
+ 
 def get_normalized_image(image, image_mean):
     image_normalized = image - image_mean
     image_normalized = np.array(image_normalized.astype(int))
@@ -179,9 +184,9 @@ def extract_imgs_from_multipage(path, image_name):
                                                          img_width, 
                                                          img_height)
     # expand dimensions to always have z dimension included as well
-    if len(input_image.shape) == 2:
-        input_image = np.expand_dims(input_image, 0)
-
+    if ("slices" not in data_dict.keys()):
+        input_image = np.expand_dims(input_image, -3)
+    
     if channel_prop not in data_dict.keys():
         channel = 0
         # if there is only one channel, no channel attribute is in data_dict
@@ -441,7 +446,6 @@ def get_translations(input_image_array, step_size_shift):
                                                               reference_image, 
                                                               correlation_values_last_shift)
 
-
         (x_shift, 
          y_shift, 
          z_shift) = refine_shift_values(input_image,
@@ -577,14 +581,13 @@ def get_initial_shift_for_image(input_image,
                                                            last_z_shift,
                                                            step_size_shift_tmp)
         all_z_shifts = [shifts[2] for shifts in all_shifts]
-        
+
         shifted_references = add_z_shifted_reference_images(reference_image, 
                                                                 shifted_references, 
                                                                 all_z_shifts)
         shifted_input_image_stats = add_z_shifted_input_image_stats(input_image, 
                                                                     shifted_input_image_stats, 
                                                                     all_z_shifts)
-
         # try shifts lower and higher than the last shift in both directions
         for x_shift, y_shift, z_shift in all_shifts:
             # do not try z shifts that would move out of the dimension
@@ -601,22 +604,33 @@ def get_initial_shift_for_image(input_image,
                                                            input_image_mean, 
                                                            shifted_reference, 
                                                            std_reference)
-            x_shift_relative_to_last = abs_to_rel_shift(x_shift,
-                                                        step_size_shift_tmp,
-                                                        last_x_shift)
-            y_shift_relative_to_last = abs_to_rel_shift(y_shift,
-                                                        step_size_shift_tmp,
-                                                        last_y_shift)
-            z_shift_relative_to_last = abs_to_rel_shift(z_shift,
-                                                        step_size_shift_tmp,
-                                                        last_z_shift)
-
+            array_shape = correlation_value_array.shape
+            # if there was only one value tested, the shift is the same
+            # as the last shift
+            if array_shape[0] > 1:
+                x_shift_relative_to_last = abs_to_rel_shift(x_shift,
+                                                            step_size_shift_tmp,
+                                                            last_x_shift)
+            else:
+                x_shift_relative_to_last = last_x_shift
+            if array_shape[1] > 1:
+                y_shift_relative_to_last = abs_to_rel_shift(y_shift,
+                                                            step_size_shift_tmp,
+                                                            last_y_shift)
+            else:
+                y_shift_relative_to_last = last_y_shift
+            if array_shape[2] > 1:
+                z_shift_relative_to_last = abs_to_rel_shift(z_shift,
+                                                            step_size_shift_tmp,
+                                                            last_z_shift)
+            else:
+                z_shift_relative_to_last  = last_z_shift
+                
             correlation_value_array[x_shift_relative_to_last, 
                                     y_shift_relative_to_last, 
                                     z_shift_relative_to_last] = correlation_value
                 
     
-        
         #get the highest (best) correlation value
         best_correlation_value = np.max(correlation_value_array)
         
@@ -628,6 +642,7 @@ def get_initial_shift_for_image(input_image,
     #get the position of the best correlation value in matrix
     best_correlation = np.where(correlation_value_array == 
                                 best_correlation_value)
+    
     # TODO:
     # what if there are two shift values with 
     # exactly the same correlation values?
@@ -636,16 +651,27 @@ def get_initial_shift_for_image(input_image,
     # this would also be a problem for refining the shift values
 
     #calculate corresponding shifts by starting from lastshifts
-    x_shift = rel_to_abs_shift(best_correlation[0][0],
-                               step_size_shift_tmp,
-                               last_x_shift)
-    y_shift = rel_to_abs_shift(best_correlation[1][0],
-                               step_size_shift_tmp,
-                               last_y_shift)
-    z_shift = rel_to_abs_shift(best_correlation[2][0],
-                               step_size_shift_tmp,
-                               last_z_shift)
-    
+    if array_shape[0] > 1:
+        x_shift = rel_to_abs_shift(best_correlation[0][0],
+                                   step_size_shift_tmp,
+                                   last_x_shift)
+    else:
+        x_shift = last_x_shift
+        
+    if array_shape[1] > 1:
+        y_shift = rel_to_abs_shift(best_correlation[1][0],
+                                   step_size_shift_tmp,
+                                   last_y_shift)
+    else:
+        y_shift = last_y_shift
+        
+    if array_shape[2] > 1:
+        z_shift = rel_to_abs_shift(best_correlation[2][0],
+                                   step_size_shift_tmp,
+                                   last_z_shift)
+    else:
+        z_shift = last_z_shift
+        
     (x_shift_change,
      y_shift_change,
      z_shift_change) = get_initial_shift_refinings(best_correlation, 
@@ -727,9 +753,19 @@ def get_shifts_from_empty_array_positions(array, last_x_shift, last_y_shift,
     all_shifts = np.vstack(np.where(array == 0))
     
     # to get the absolute shift values, add the last_shift values to them
-    all_shifts[0] += (last_x_shift - step_size_shift)
-    all_shifts[1] += (last_y_shift - step_size_shift)
-    all_shifts[2] += (last_z_shift - step_size_shift)
+    if array.shape[0] > 1:
+        all_shifts[0] += (last_x_shift - step_size_shift)
+    if array.shape[1] > 1:
+        all_shifts[1] += (last_y_shift - step_size_shift)
+    # make sure that the z shift is not changed if there should 
+    # not be additional z shifts
+    if array.shape[2] == 1:
+        pass
+    elif array.shape[2] <= step_size_shift:
+        raise ValueError("There are fewer z slices then the step_size_shift."
+                         "This is not implemented.")
+    else:
+        all_shifts[2] += (last_z_shift - step_size_shift)
     
     # invert to be able to loop through the shifts
     all_shifts = all_shifts.T
@@ -921,14 +957,40 @@ def translate_images(all_translations,image_array,image_name_array,
         return registered_images_array
 
 
+def check_whether_file_name_is_allowed(file_name, file_name_inclusions,
+                                       file_name_exclusions):
+    matches_one = False
+    for inclusion in file_name_inclusions:
+        if file_name.find(inclusion) != -1:
+            matches_one = True
+            break
+    if not matches_one:
+        return False
+    matches_none = True
+    for exclusion in file_name_exclusions:
+        if file_name.find(exclusion) != -1:
+            matches_none = False
+            break
+    if matches_none:
+        return True
+    else:
+        return False
+
 def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
-                              current_nb, force_multipage_save = False) :
+                              current_nb, file_name_inclusions, 
+                              file_name_exclusions,
+                              force_multipage_save = False) :
     """
     Translate all cells within a folder starting with xy shift values up until step_size_shift.
     Allow cells within folder to be either saved as tiff files in channel folder in cell folder
     or cells saved as a single multi-channel tiff
     """
     for cell in os.listdir(exp_iteration_folder):
+        cell_allowed = check_whether_file_name_is_allowed(cell,
+                                                          file_name_inclusions,
+                                                          file_name_exclusions)
+        if not cell_allowed:
+            continue
         image_arrays = []
         image_name_arrays = []
         image_shapes = []
@@ -977,6 +1039,7 @@ def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
                      channels, 
                      meta_data) = extract_imgs_from_multipage(exp_iteration_folder, 
                                                               cell)
+
                     multi_page = True
 
         if (current_nb % processes) == 0:
@@ -988,18 +1051,33 @@ def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
             continue
         if len(image_arrays[0].shape) <= 2:
             continue
-        for nb, channel in enumerate(channels):
+        if remove_zero_images:
+            zero_frames_channels = []
             #remove zero images
             #by selecting all timeframes comprised of a non zero image
-            #image_arrays[nb] = image_arrays[nb][np.all(image_arrays[nb] > 0, axis=(1,2)),:,:]
-            if channel != reference_channel:
-                continue
-            # image_arrays = delete_out_of_focus_images(image_arrays, 
-            #                                          nb, cell, 
-            #                                          background_val, 
-            #                                          deleted_frames_cols, 
-            #                                          output_folder, 
-            #                                          nb_empty_frames_instead_of_out_of_focus_frames)
+            for nb, channel in enumerate(channels):
+                zero_frames_channels.append(np.all(image_arrays[nb] > 0, 
+                                                   axis=(-3,-2,-1)))
+            # make sure to only have one set of zero frames for all channels
+            # otherwise channels will have different number of frames
+            # remove all frames with a zero frame in at least one channel
+            final_zero_frames = zero_frames_channels[0]
+            for zero_frames in zero_frames_channels[1:]:
+                final_zero_frames = final_zero_frames & zero_frames
+                
+            for nb, channel in enumerate(channels):
+                image_arrays[nb] = image_arrays[nb][final_zero_frames,:,:,:]
+            
+        if remove_out_of_focus_images:
+            for nb, channel in enumerate(channels):
+                if channel != reference_channel:
+                    continue
+                image_arrays = delete_out_of_focus_images(image_arrays, 
+                                                          nb, cell, 
+                                                          background_val, 
+                                                          deleted_frames_cols, 
+                                                          output_folder, 
+                                                          nb_empty_frames_instead_of_out_of_focus_frames)
 
         for nb, channel in enumerate(channels):
             if channel != reference_channel:
@@ -1031,8 +1109,8 @@ def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
 
         if len(registered_images_array_all_channels) <= 0:
             return current_nb
-        #transform list into numpy array
-        registered_images_array_all_channels = np.array(registered_images_array_all_channels)
+        #transform list into numpy array by stacking into new dimension
+        registered_images_array_all_channels = np.stack(registered_images_array_all_channels)
         # then add empty axes for Z dimension, if z is not present already
         # at second 
         if len(registered_images_array_all_channels.shape) < 5:
@@ -1058,6 +1136,53 @@ def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
                   plugin="tifffile", metadata = meta_data)
     return current_nb
 
+def goDeeper(props,this_path, a, max_a, conditions, folders, step_size_shift,
+             current_nb, file_name_inclusions, file_name_exclusions, 
+             force_multipag_save):
+    a += 1
+    for newFolder in os.listdir(this_path):
+        if conditions[a-1] != "":
+            if newFolder.find(conditions[a-1]) != -1:
+                useFolder = True
+            else:
+                useFolder = False
+        else:
+            useFolder = True
+        if not useFolder:
+            continue
+        path_new = os.path.join(this_path, newFolder)
+        props_new = copy.copy(props)
+        props_new[folders[a-1]] = newFolder
+        if a == (max_a):
+            if os.path.isdir(path_new):
+                current_nb = translate_cells_in_folder(path_new, 
+                                                       props_new["date"], 
+                                                       step_size_shift, 
+                                                       current_nb,
+                                                       file_name_inclusions, 
+                                                       file_name_exclusions,
+                                                       force_multipage_save = force_multipage_save)
+        else:
+            if os.path.isdir(path_new):
+                current_nb = goDeeper(props_new, path_new, a, max_a,
+                                      conditions,folders, step_size_shift,
+                                     current_nb, 
+                                     file_name_inclusions, file_name_exclusions,
+                                     force_multipag_save)
+                
+
+def traverseFolders(input_path, folders, conditions, step_size_shift,
+                    current_nb, file_name_inclusions, file_name_exclusions, 
+                    force_multipag_save,
+                    ):
+    props = {}
+    nb = 0
+    goDeeper(props,input_path,0,len(folders),conditions,folders, step_size_shift,
+             current_nb, file_name_inclusions, file_name_exclusions, 
+             force_multipag_save)
+    
+
+
 #expected shift needs to be at least 1
 step_size_shift = 2
 
@@ -1080,35 +1205,10 @@ if choose_folder_manually:
             current_nb = 0
             translate_cells_in_folder(collection_folder, "unknown", 
                                    step_size_shift, current_nb, 
+                                   file_name_inclusions, file_name_exclusions,
                                    force_multipage_save = force_multipage_save)
 
 else:
-    for date in os.listdir(collection_folder):
-        print(date)
-        date_folder = os.path.join(collection_folder, date)
-        if( not os.path.isdir(date_folder)):
-            continue
-        for exp_class in os.listdir(date_folder):
-            print(exp_class)
-            if images_in_sorted_folder:
-                exp_classFolder = os.path.join(date_folder,exp_class,"sorted")
-            else:
-                exp_classFolder = os.path.join(date_folder, exp_class)
-            if(not os.path.isdir(exp_classFolder)):
-                continue
-            for expType in os.listdir(exp_classFolder):
-                print(expType)
-                exp_type_folder = os.path.join(exp_classFolder, expType)
-                if(not os.path.isdir(exp_type_folder)):
-                    continue
-                for exp_iteration in os.listdir(exp_type_folder):
-                    print(exp_iteration)
-                    exp_iteration_folder = os.path.join(exp_type_folder, 
-                                                      exp_iteration)
-                    if (not os.path.isdir(exp_iteration_folder)):
-                        continue
-                    current_nb = translate_cells_in_folder(exp_iteration_folder, 
-                                                        date, 
-                                                        step_size_shift, 
-                                                        current_nb, 
-                                                        force_multipage_save = force_multipage_save)
+    traverseFolders(input_path, folders,conditions, step_size_shift,
+                    current_nb, file_name_inclusions, file_name_exclusions,
+                    force_multipage_save)
