@@ -408,7 +408,6 @@ def get_translations(input_image_array, step_size_shift, max_shift):
             correlation_values = sums / (input_image_array[0].shape[0] * input_image_array[0].shape[1])
     print(time.time() - start)
     """
-
     # if shift should be started from the back, reverse the order
     # of images (in the end reverse the shifts to be applicable to a
     # non reversed image array)
@@ -421,7 +420,7 @@ def get_translations(input_image_array, step_size_shift, max_shift):
     correlation_values_last_shift = []
     counter = 0
     for frame_nb, input_image in enumerate(input_image_array):
-        print(frame_nb)
+        print("Finding translation for Frame #",frame_nb)
         # use first nonzero image as first reference image
         if is_first_nonzero_image:
             # only if the image is nonzero, set reference and continue
@@ -506,7 +505,7 @@ def get_initial_shift_for_image(input_image,
     # needs to be different to be considered an outlier, which leads
     # to a larger range of shift values to be tried out and the reference
     # image to be updated
-    threshold_std_difference = 7
+    threshold_std_difference = 2
     
     # POTENTIAL ISSUES FOR LARGE SHIFTS:
     # shifting too far could cause problems due to rolling of image 
@@ -570,6 +569,7 @@ def get_initial_shift_for_image(input_image,
     while not good_correlation_found:
         # at the beginning of each loop check whether the difference in stds
         # from the mean is smaller than the defined threshold
+        print(difference_in_stds)
         if ((difference_in_stds > threshold_std_difference) & 
             (len(correlation_values_last_shift) > 2)):
             step_size_shift_tmp += 1
@@ -644,7 +644,6 @@ def get_initial_shift_for_image(input_image,
                                     y_shift_relative_to_last, 
                                     z_shift_relative_to_last] = correlation_value
                 
-    
         #get the highest (best) correlation value
         best_correlation_value = np.max(correlation_value_array)
         
@@ -657,6 +656,9 @@ def get_initial_shift_for_image(input_image,
             no_translation_found = True
             break
         
+    print("\n\n")
+    print(np.max(correlation_value_array))
+    print(correlation_value_array)
     if no_translation_found:
         x_shift = np.nan
         y_shift = np.nan
@@ -702,11 +704,16 @@ def get_initial_shift_for_image(input_image,
         (x_shift_change,
          y_shift_change,
          z_shift_change) = get_initial_shift_refinings(best_correlation, 
-                                                       step_size_shift)
+                                                       step_size_shift_tmp)
                               
         # if there is only one value in the z dimension, do not refine z shift
         if input_image.shape[0] == 1:
             z_shift_change = 0
+        
+        print(step_size_shift, correlation_value_array.shape,
+              best_correlation,x_shift_change,
+         y_shift_change)
+        print(x_shift, y_shift)
     
     return (x_shift, y_shift, z_shift,
             x_shift_change, y_shift_change, z_shift_change,
@@ -831,6 +838,8 @@ def refine_shift_values(input_image,
         refine_z_shift = True
         
     while refine_x_shift | refine_y_shift | refine_z_shift:
+        print(refine_x_shift, refine_y_shift)
+        print(x_shift, y_shift)
         #save all x_shifts & y_shifts to be tested
         x_shifts = []
         x_shifts.append(x_shift)
@@ -855,7 +864,7 @@ def refine_shift_values(input_image,
         best_x_shift = x_shift
         best_y_shift = y_shift
         best_z_shift = z_shift
-        all_shifts = itertools.product(x_shifts, y_shifts, z_shifts)
+        all_shifts = list(itertools.product(x_shifts, y_shifts, z_shifts))
         
         all_z_shifts = [shifts[2] for shifts in all_shifts]
         
@@ -865,14 +874,13 @@ def refine_shift_values(input_image,
         shifted_input_image_stats = add_z_shifted_input_image_stats(input_image, 
                                                                     shifted_input_image_stats, 
                                                                     all_z_shifts)
-        
-        
+       
         #test all combinations of x_shifts and y_shifts
         for x_shift_test, y_shift_test, z_shift_test in all_shifts:
             shifted_reference = all_shifted_references[z_shift_test]["image"]
             std_reference = all_shifted_references[z_shift_test]["std"]
-            input_image_mean = all_shifted_input_images[z_shift_test]["mean"]
-            std_input_image = all_shifted_input_images[z_shift_test]["std"]
+            input_image_mean = shifted_input_image_stats[z_shift_test]["mean"]
+            std_input_image = shifted_input_image_stats[z_shift_test]["std"]
             #don't calculate correlation that was calculated already again
             if ((x_shift_test == x_shift) & (y_shift_test == y_shift) &
                  (z_shift_test == z_shift)):
@@ -885,8 +893,10 @@ def refine_shift_values(input_image,
                                                                  input_image_mean, 
                                                                  shifted_reference, 
                                                                  std_reference)
+            print(best_correlation_value, correlation_value_test)
             #check if the new correlation_value is larger than the best so far
             if correlation_value_test > best_correlation_value:
+                print("NEW BEST CORRELATION FOUND!")
                 #update best correlation value
                 best_correlation_value = correlation_value_test
                 #save shifts for best correlation value in tmp vars
@@ -965,7 +975,7 @@ def translate_images(all_translations,image_array,image_name_array,
                 replace_with_zero_image = True
             # if no translation was found, replace values with 0
             # to allow the translation by 0 (no translation)
-            # instead of by nan
+            # instead of by nangit add 
             x_shift, y_shift, z_shift = (0,0,0)
                 
         if replace_with_zero_image:
@@ -1230,7 +1240,7 @@ def traverseFolders(input_path, folders, conditions, step_size_shift,max_shift,
 
 
 #expected shift needs to be at least 1
-step_size_shift = 2
+step_size_shift = 3
 
 current_nb = 0
 
