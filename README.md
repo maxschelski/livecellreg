@@ -1,7 +1,7 @@
 # livecellreg
 Correlation-based registration of 2D &amp; 3D live cell imaging movies using translation of images.
 
-Still needs a lot of refactoring. Will be converted in a locally installable package in June 2022.
+Still needs a lot of refactoring. Will be converted in a locally installable package in June-July 2022.
 
 For now do the following to use the script
 1) execute script livecellreg.py with 
