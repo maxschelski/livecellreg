@@ -1,7 +1,7 @@
 # livecellreg
-Correlation-based registration of 2D &amp; 3D live cell imaging movies using translation of images.
+Correlation-based registration of 2D &amp; 3D live cell imaging movies using translation of images. It also works quite well for cells with signals that change localization over time within the structure that should be registered - e.g. a signal that is moving within the cell. 
 
-Still needs a lot of refactoring. Will be converted in a locally installable package in June-July 2022.
+Still needs a lot of refactoring. Will be converted into a locally installable package in June-July 2022.
 
 For now do the following to use the script
 1) execute script livecellreg.py with 
