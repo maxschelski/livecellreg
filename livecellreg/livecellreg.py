@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+                                                                                                                                                                                                                                                  # -*- coding: utf-8 -*-
 """
 Created on Sun Jul 14 09:22:35 2019
 
@@ -43,7 +43,29 @@ import math
 
 
 
+input_path = "E:\\TUBB\\MT-RF_manipulation\\FRB-Dync1h1m-C2-TE-CAMS3\\"
 input_path = "E:\\TUBB\\MT-RF_manipulation\\LatA10-FRB-Dync1h1m-C2-TE\\"
+input_path = "C:\\Users\\Maxsc\\Documents\\data_tmp\\FRB-Dync1h1m-C2-TE-CAMS3\\"
+
+input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF13m-C2-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF13aM-C2-Control-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF1aM-C2-Control-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF1aM-C2-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\recruit-CAAX-control\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\FRB-KIFC1-N593K-C2-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV7-FRB-Dync1h1m-C2-TE-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV5-FRB-Dync1h1m-C2-TE-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV4-FRB-Dync1h1m-C2-TE-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV10-FRB-Dync1h1m-C2-TE-CAMS3\\"
+
+# input_path = "C:\\Users\\Maxsc\\Documents\\data_tmp\\slices\\211104\\registration\\test"
+
+# super bright spot: 220501 cell0006
+# quite a bit shift: 220315
+# lots of shift: 220225 cell0003, cell0001
+
+
+
 #Choose the channel with an as much as possible non-changing intracellular localization
 #signals that accumulate at a certain place or are excluded from a from a place
 #over time are not going to work very well
@@ -53,14 +75,69 @@ images_in_sorted_folder = False
 choose_folder_manually = False
 force_multipage_save = False
 only_register_multipage_tiffs = True
-overwrite_registered_images = True
+overwrite_registered_images = False
+
+# start the registration from the last frame
+# thereby the position of all frames 
+# will be similar to the position in the last frame
 start_reg_from_last_img = False
+
+
+# number of STD that the correlation value of an image with the last shift
+# needs to be different to be considered an outlier, which leads
+# to a larger range of shift values to be tried out and the reference
+# image to be updated
+# will be increased up to max_shift or until the difference 
+# is below threshold
+threshold_std_difference = 4
+
+# minimum of correlation value difference from mean in multiples of std
+# for some conditions (e.g. live cell imaging in 3D with a bit of drift)
+# it's better to choose this smaller than threshold_std_difference
+threshold_std_for_new_reference = 3
+# alterantively to changing the threshold std for new reference
+# defining how often a new reference image is choosen can help
+# empirically found to be helpful for 3D stacks with more shift
+nb_images_until_new_reference = np.nan
+
+# max std difference allowed to not consider the image as outlier
+outlier_std_difference = 10
+
+# the maximum multiple of stds above the mean of an image that is allowed
+# above that it will be cut to that multiple
+max_multiple_stds_above = 10
+
+# refining shift value
+# maximum number of testing new shift values without improvement
+explorations_without_improvement_outlier = 100#20
+explorations_without_improvement = 10
+
+
+# TODO FOR SPEEDING UP SCRIPT:
+# - explore shift values for reining shift values differently; start with large
+#   steps and once they don't lead to improvement anymore, try back and forth
+#   from new position to find direction it goes in, once it cannot be improved
+#   anymore, reduce step size until step size arrived at 1 and 
+#   cannot be improved anymore
 
 remove_zero_images = True
 
-# maximum shift in pixels which is allowed
+
+# step_size_shift needs to be at least 1
+step_size_shift = 2
+
+
+# if correlation value cannot be brought below the threshold_std_difference,
+# this is an alternative rule to end initial optimization
+# number of times that the same shift value needs to be found 
+# to get the initial shift value, to finish this part
+necessary_shift_count = 5
+
+# maximum shift in pixels which is allowed to get initial shift 
 # beyond this shift, the image will be replaced with a zero image
-max_shift = 150
+# usually before max shift is triggered, enough shifts in the same direction
+# were found 
+max_shift = 150#20
 # if no translation could be found within the allowed max shift
 # this happens e.g. if the position scan at the
 # microscope ended up at the wrong cell), replace images with zero image
@@ -87,7 +164,7 @@ conditions = [""]
 file_name_inclusions = [""]
 # define strings that must not be present in file name, one of them present
 # will exclude the file
-file_name_exclusions = ["Cer"]
+file_name_exclusions = ["Cer", "wholecell"]
 
 
  
@@ -382,9 +459,7 @@ def cut_image_based_on_z_shift(image, z_shift):
 def get_translations(input_image_array, step_size_shift, max_shift):
     all_shifts = []
     is_first_nonzero_image = True
-    last_x_shift = 0
-    last_y_shift = 0
-    last_z_shift = 0
+    last_shift = {"x":0, "y":0, "z":0}
     """
     #WORK IN PROGRESS TO VECTORIZE THE REGISTRATION
     start = time.time()
@@ -416,6 +491,19 @@ def get_translations(input_image_array, step_size_shift, max_shift):
     else:
         all_shifts.append([0,0,0])
 
+    # prevent too high values in input image array
+    # by only allowing a maximum multiple of stds above the mean
+    # this is crucial for non cytosolic signals or in general signals that
+    # change their localization during the movie
+    image_means = np.mean(input_image_array,axis=(2,3), keepdims=True)
+    image_stds = np.std(input_image_array, axis=(2,3), keepdims=True)
+    new_images = input_image_array - image_means
+    new_images = new_images / image_stds
+    new_images[new_images > max_multiple_stds_above] = max_multiple_stds_above
+    new_images *= image_stds
+    new_images += image_means
+    input_image_array = new_images
+
     # save all correlation values with last shift
     correlation_values_last_shift = []
     counter = 0
@@ -440,50 +528,49 @@ def get_translations(input_image_array, step_size_shift, max_shift):
         input_image_mean = np.mean(input_image)
         std_input_image = np.std(input_image)
         
-        (x_shift, y_shift, z_shift,
-         x_shift_change, y_shift_change, z_shift_change, 
+        (shift,
+         shift_changes,
          best_correlation_value,
          correlation_values_last_shift,
+         difference_in_stds,
          get_new_reference_image, 
          shifted_references,
          shifted_input_image_stats) = get_initial_shift_for_image(input_image, 
-                                                              last_x_shift, 
-                                                              last_y_shift,
-                                                              last_z_shift,
+                                                              last_shift, 
                                                               step_size_shift,
                                                               max_shift,
                                                               reference_image, 
                                                               correlation_values_last_shift)
-        if np.isnan(x_shift):
-            all_shifts.append([np.nan,np.nan,np.nan])              
-            continue
-
-        (x_shift, 
-         y_shift, 
-         z_shift) = refine_shift_values(input_image,
-                                        x_shift_change, y_shift_change,
-                                        z_shift_change,last_z_shift,
-                                        best_correlation_value,
-                                        x_shift, y_shift, z_shift, 
+        
+        shift = refine_shift_values(input_image, shift_changes,
+                                        best_correlation_value, shift,
                                         reference_image, 
-                                        step_size_shift, 
+                                        difference_in_stds,
                                          shifted_references,
                                          shifted_input_image_stats)
-        all_shifts.append([x_shift,y_shift, z_shift])
+        
+            
+        all_shifts.append([shift["x"], shift["y"], shift["z"]])
         #update last shift variables
         #will be used as starting point for shifting the next frame
-        last_x_shift = x_shift
-        last_y_shift = y_shift
-        last_z_shift = z_shift
+        last_shift = shift
+        
+        if not np.isnan(nb_images_until_new_reference):
+            if counter >= nb_images_until_new_reference:
+                get_new_reference_image = True
         
         #set new reference image
         if get_new_reference_image:
             counter = 1
-            reference_image = np.roll(input_image,(z_shift, x_shift,y_shift),
+            reference_image = np.roll(input_image,(shift["z"], 
+                                                   shift["x"],
+                                                   shift["y"]),
                                       axis=(0,2,1))
             # reference_image = get_normalized_image(reference_image, 
             #                                     input_image_mean)
             std_reference = std_input_image
+            # reset shifted reference images
+            shifted_references = {}
 
         else:
             counter += 1
@@ -497,15 +584,10 @@ def get_translations(input_image_array, step_size_shift, max_shift):
 
     return all_shifts
 
-def get_initial_shift_for_image(input_image, 
-                                last_x_shift, last_y_shift, last_z_shift,
+def get_initial_shift_for_image(input_image, last_shift,
                                 step_size_shift,max_shift,
                                 reference_image, correlation_values_last_shift):
-    # number of STD that the correlation value of an image with the last shift
-    # needs to be different to be considered an outlier, which leads
-    # to a larger range of shift values to be tried out and the reference
-    # image to be updated
-    threshold_std_difference = 2
+    
     
     # POTENTIAL ISSUES FOR LARGE SHIFTS:
     # shifting too far could cause problems due to rolling of image 
@@ -524,19 +606,19 @@ def get_initial_shift_for_image(input_image,
     
     shifted_references = add_z_shifted_reference_images(reference_image, 
                                                             shifted_references, 
-                                                            [last_z_shift])
+                                                            [last_shift["z"]])
     shifted_input_image_stats = add_z_shifted_input_image_stats(input_image, 
                                                                 shifted_input_image_stats, 
-                                                                [last_z_shift])
+                                                                [last_shift["z"]])
     
-    shifted_reference = shifted_references[last_z_shift]["image"]
-    std_reference = shifted_references[last_z_shift]["std"]
-    input_image_mean = shifted_input_image_stats[last_z_shift]["mean"]
-    std_input_image = shifted_input_image_stats[last_z_shift]["std"]
+    shifted_reference = shifted_references[last_shift["z"]]["image"]
+    std_reference = shifted_references[last_shift["z"]]["std"]
+    input_image_mean = shifted_input_image_stats[last_shift["z"]]["mean"]
+    std_input_image = shifted_input_image_stats[last_shift["z"]]["std"]
     correlation_value_last_shift = calculate_correlation_value(input_image, 
-                                                           last_x_shift, 
-                                                           last_y_shift, 
-                                                           last_z_shift, 
+                                                           last_shift["x"], 
+                                                           last_shift["y"], 
+                                                           last_shift["z"], 
                                                            std_input_image, 
                                                            input_image_mean, 
                                                            shifted_reference, 
@@ -549,11 +631,21 @@ def get_initial_shift_for_image(input_image,
                                                      mean_correlation_values,
                                                      std_correlation_values)
     
-    step_size_shift_tmp = step_size_shift
+    step_size_shift_tmp = {"x":step_size_shift,
+                           "y":step_size_shift,
+                           "z": step_size_shift}
+    # make sure that step size in z is always smaller than the dimension size
+    step_size_shift_tmp["z"] = get_max_step_size_shift_for_z(step_size_shift_tmp,
+                                                             input_image)
+    
+
     correlation_value_array = get_correlation_value_array(step_size_shift_tmp,  
                                                           input_image)
+    
 
-    last_step_size_shift_tmp = step_size_shift_tmp
+    if ((difference_in_stds > threshold_std_for_new_reference) & 
+            (len(correlation_values_last_shift) > 2)):
+            get_new_reference_image = True
     
     # save initial correlation values (at last shift)
     # and if correlation value gets much lower than it got before 
@@ -565,18 +657,26 @@ def get_initial_shift_for_image(input_image,
     # (since not enough correlation values present to calculate STD)
     good_correlation_found = False
     get_new_reference_image = False
-    no_translation_found = False
+    all_shift_changes = {}
+    # initialize as zero shift is present 0 times
+    # to prevent empty dicts, since zero shifts won't be counted later
+    all_shift_changes["x"] = {0:0}
+    all_shift_changes["y"] = {0:0}
+    all_shift_changes["z"] = {0:0}
+    shift = {}
     while not good_correlation_found:
         # at the beginning of each loop check whether the difference in stds
         # from the mean is smaller than the defined threshold
         if ((difference_in_stds > threshold_std_difference) & 
             (len(correlation_values_last_shift) > 2)):
-            step_size_shift_tmp += 1
-            get_new_reference_image = True
+            for dimension in step_size_shift_tmp:
+                step_size_shift_tmp[dimension] += 1
+            # make sure that step size in z 
+            # is always smaller than the dimension size
+            step_size_shift_tmp["z"] = get_max_step_size_shift_for_z(step_size_shift_tmp,
+                                                                     input_image)
         else:
             good_correlation_found = True
-            
-        correlation_values_last_shift.append(correlation_value_last_shift)
         
         # for each iteration calculate a new correlation value matrix
         # since the step_size_shift is expanded for each iteration
@@ -589,9 +689,9 @@ def get_initial_shift_for_image(input_image,
                                                                      correlation_value_array_new)
         
         all_shifts = get_shifts_from_empty_array_positions(correlation_value_array,
-                                                           last_x_shift,
-                                                           last_y_shift,
-                                                           last_z_shift,
+                                                           last_shift["x"],
+                                                           last_shift["y"],
+                                                           last_shift["z"],
                                                            step_size_shift_tmp)
         all_z_shifts = [shifts[2] for shifts in all_shifts]
 
@@ -603,6 +703,9 @@ def get_initial_shift_for_image(input_image,
                                                                     all_z_shifts)
         # try shifts lower and higher than the last shift in both directions
         for x_shift, y_shift, z_shift in all_shifts:
+            shift["x"] = x_shift
+            shift["y"] = y_shift
+            shift["z"] = z_shift
             # do not try z shifts that would move out of the dimension
             if z_shift >= input_image.shape[0]:
                 continue
@@ -618,30 +721,23 @@ def get_initial_shift_for_image(input_image,
                                                            shifted_reference, 
                                                            std_reference)
             array_shape = correlation_value_array.shape
+            shift_relative_to_last = {}
             # if there was only one value tested, the shift is the same
             # as the last shift
-            if array_shape[0] > 1:
-                x_shift_relative_to_last = abs_to_rel_shift(x_shift,
-                                                            step_size_shift_tmp,
-                                                            last_x_shift)
-            else:
-                x_shift_relative_to_last = last_x_shift
-            if array_shape[1] > 1:
-                y_shift_relative_to_last = abs_to_rel_shift(y_shift,
-                                                            step_size_shift_tmp,
-                                                            last_y_shift)
-            else:
-                y_shift_relative_to_last = last_y_shift
-            if array_shape[2] > 1:
-                z_shift_relative_to_last = abs_to_rel_shift(z_shift,
-                                                            step_size_shift_tmp,
-                                                            last_z_shift)
-            else:
-                z_shift_relative_to_last  = last_z_shift
+            # add dimensions in order of correlation value array
+            dimensions = ["x", "y", "z"]
+            for dim_nb, dimension in enumerate(dimensions):
                 
-            correlation_value_array[x_shift_relative_to_last, 
-                                    y_shift_relative_to_last, 
-                                    z_shift_relative_to_last] = correlation_value
+                if array_shape[dim_nb] > 1:
+                    shift_relative_to_last[dimension] = abs_to_rel_shift(shift[dimension],
+                                                                         step_size_shift_tmp[dimension],
+                                                                         last_shift[dimension])
+                else:
+                    shift_relative_to_last[dimension] = last_shift[dimension]
+                    
+            correlation_value_array[shift_relative_to_last["x"], 
+                                    shift_relative_to_last["y"], 
+                                    shift_relative_to_last["z"]] = correlation_value
                 
         #get the highest (best) correlation value
         best_correlation_value = np.max(correlation_value_array)
@@ -649,76 +745,95 @@ def get_initial_shift_for_image(input_image,
         difference_in_stds = get_std_diff_of_correlation(best_correlation_value,
                                                          mean_correlation_values,
                                                          std_correlation_values)
-        last_step_size_shift_tmp = step_size_shift_tmp
         
-        if (step_size_shift_tmp*2) > max_shift:
-            no_translation_found = True
-            break
-        
-    if no_translation_found:
-        x_shift = np.nan
-        y_shift = np.nan
-        z_shift = np.nan
-        x_shift_change = np.nan
-        y_shift_change = np.nan
-        z_shift_change = np.nan
-        
-    else:
-        #get the position of the best correlation value in matrix
         best_correlation = np.where(correlation_value_array == 
                                     best_correlation_value)
         
-        # TODO:
-        # what if there are two shift values with 
-        # exactly the same correlation values?
-        # does this ever happen?
-        # direction to follow up on would be wrong;
-        # this would also be a problem for refining the shift values
+        (shift_changes) = get_initial_shift_refinings(best_correlation, 
+                                                       step_size_shift_tmp,
+                                                       correlation_value_array.shape)
+                                                       
+        # increase counter for each shift change over all trials
+        for dimension, shift_change in shift_changes.items():
+            # do not count zero shift changes
+            if shift_change == 0:
+                continue
+            if shift_change not in all_shift_changes[dimension]:
+                all_shift_changes[dimension][shift_change] = 0
+            all_shift_changes[dimension][shift_change] += 1
+            
+        # then get the maximum count of each shift value for all dimension
+        max_shift_value_counts = [max(shift_changes.values()) 
+                                  if len(shift_changes) > 0
+                                  else 0
+                                  for shift_changes 
+                                  in all_shift_changes.values()
+                                  ]
+        # get the maximum count across all dimensions
+        max_shift_value_count = max(max_shift_value_counts)
+        # if one shift was identified often enough, use that shift change
+        if max_shift_value_count == necessary_shift_count:
+            good_correlation_found = True
+            shift_changes = get_max_counted_shift_change(all_shift_changes)
+            break
+        
+        # stop optimization after max_shfit is reached
+        max_step_size_shift = max(list(step_size_shift_tmp.values()))
+        if (max_step_size_shift*2) > max_shift:
+            if difference_in_stds < outlier_std_difference:
+                good_correlation_found = True
+            else:
+                good_correlation_found = False
+            break
     
-        #calculate corresponding shifts by starting from lastshifts
-        if array_shape[0] > 1:
-            x_shift = rel_to_abs_shift(best_correlation[0][0],
-                                       step_size_shift_tmp,
-                                       last_x_shift)
+    # if the correlation was too different initially, 
+    # do not add the initial correlation value
+    # otherwise the correlation will be shifted by outliers
+    # for outliers, add the optimized correlation value if a good correlation
+    # value was found
+    if not get_new_reference_image:
+        correlation_values_last_shift.append(correlation_value_last_shift)
+    elif good_correlation_found:
+        correlation_values_last_shift.append(best_correlation_value)
+        
+    # TODO:
+    # what if there are two shift values with 
+    # exactly the same correlation values?
+    # does this ever happen?
+    # direction to follow up on would be wrong;
+    # this would also be a problem for refining the shift values
+
+    # set dimensions in order of shifts
+    #calculate corresponding shifts by starting from lastshifts
+    for dim_nb, dimension in enumerate(shift.keys()):
+        if array_shape[dim_nb] > 1:
+            shift[dimension] = rel_to_abs_shift(best_correlation[dim_nb][0],
+                                                step_size_shift_tmp[dimension],
+                                                last_shift[dimension])
         else:
-            x_shift = last_x_shift
-            
-        if array_shape[1] > 1:
-            y_shift = rel_to_abs_shift(best_correlation[1][0],
-                                       step_size_shift_tmp,
-                                       last_y_shift)
-        else:
-            y_shift = last_y_shift
-            
-        if array_shape[2] > 1:
-            z_shift = rel_to_abs_shift(best_correlation[2][0],
-                                       step_size_shift_tmp,
-                                       last_z_shift)
-        else:
-            z_shift = last_z_shift
-            
-        (x_shift_change,
-         y_shift_change,
-         z_shift_change) = get_initial_shift_refinings(best_correlation, 
-                                                       step_size_shift_tmp)
-                              
-        # if there is only one value in the z dimension, do not refine z shift
-        if input_image.shape[0] == 1:
-            z_shift_change = 0
+            shift[dimension] = last_shift[dimension]
+
     
-    return (x_shift, y_shift, z_shift,
-            x_shift_change, y_shift_change, z_shift_change,
+    return (shift, shift_changes,
             best_correlation_value, correlation_values_last_shift,
+            difference_in_stds,
             get_new_reference_image, shifted_references,
             shifted_input_image_stats)
 
 def get_correlation_value_array(step_size_shift_tmp,  input_image):
     image_shape = input_image.shape
-    z_dimension = min(image_shape[0], step_size_shift_tmp*2 + 1)
-    correlation_value_array = np.zeros((step_size_shift_tmp*2 + 1, 
-                                        step_size_shift_tmp*2 + 1,
-                                        z_dimension))
+    correlation_value_array = np.zeros((step_size_shift_tmp["x"]*2 + 1, 
+                                        step_size_shift_tmp["y"]*2 + 1,
+                                        step_size_shift_tmp["z"]*2 + 1))
     return correlation_value_array
+
+
+def get_max_step_size_shift_for_z(step_size_shift_tmp, input_image):
+    step_size_shift_z = min(input_image.shape[0] - 2, 
+                            step_size_shift_tmp["z"])
+    step_size_shift_z = max(step_size_shift_z, 0)
+    return step_size_shift_z
+
 
 def get_std_diff_of_correlation(correlation_value, mean_correlation_values,
                                 std_correlation_values):
@@ -779,18 +894,15 @@ def get_shifts_from_empty_array_positions(array, last_x_shift, last_y_shift,
     
     # to get the absolute shift values, add the last_shift values to them
     if array.shape[0] > 1:
-        all_shifts[0] += (last_x_shift - step_size_shift)
+        all_shifts[0] += (last_x_shift - step_size_shift["x"])
     if array.shape[1] > 1:
-        all_shifts[1] += (last_y_shift - step_size_shift)
+        all_shifts[1] += (last_y_shift - step_size_shift["y"])
     # make sure that the z shift is not changed if there should 
     # not be additional z shifts
     if array.shape[2] == 1:
         pass
-    elif array.shape[2] <= step_size_shift:
-        raise ValueError("There are fewer z slices then the step_size_shift."
-                         "This is not implemented.")
     else:
-        all_shifts[2] += (last_z_shift - step_size_shift)
+        all_shifts[2] += (last_z_shift - step_size_shift["z"])
     
     # invert to be able to loop through the shifts
     all_shifts = all_shifts.T
@@ -804,75 +916,116 @@ def rel_to_abs_shift(rel_shift, step_size_shift, last_shift):
     abs_shift = rel_shift - step_size_shift + last_shift
     return abs_shift
 
-def refine_shift_values(input_image, 
-                        x_shift_change, y_shift_change, z_shift_change,
-                        last_z_shift,
-                        best_correlation_value,
-                        x_shift, y_shift, z_shift, 
-                        reference_image, step_size_shift,
-                        shifted_references,
-                        shifted_input_image_stats):
-    
-    if x_shift_change == 0:
-        refine_x_shift = False
-    else:
-        refine_x_shift = True
-        
-    if y_shift_change == 0:
-        refine_y_shift = False
-    else:
-        refine_y_shift = True
-        
-    if z_shift_change == 0:
-        refine_z_shift = False
-    else:
-        refine_z_shift = True
-        
-    while refine_x_shift | refine_y_shift | refine_z_shift:
-        #save all x_shifts & y_shifts to be tested
-        x_shifts = []
-        x_shifts.append(x_shift)
-        y_shifts = []
-        y_shifts.append(y_shift)
-        z_shifts = []
-        z_shifts.append(z_shift)
-        #if shift should be refined
-        #change shift further in previously defined direction
-        if refine_x_shift:
-            x_shifts.append(x_shift + x_shift_change)
-        if refine_y_shift:
-            y_shifts.append(y_shift + y_shift_change)
-        if refine_z_shift:
-            new_z_shift = z_shift + z_shift_change
-            # only add new z_shift, if it does not move out of the z dimension
-            if abs(new_z_shift) < input_image.shape[0]:
-                z_shifts.append(new_z_shift)
-            else:
-                refine_z_shift = False
 
-        best_x_shift = x_shift
-        best_y_shift = y_shift
-        best_z_shift = z_shift
-        all_shifts = list(itertools.product(x_shifts, y_shifts, z_shifts))
+def get_max_counted_shift_change(all_shift_changes):
+    """
+    From counts of all shift changes get shift_changes the dimension with
+    the highest count having the shift change with the highest count in that
+    dimension. For all other dimension set shift change to zero.
+    """
+    max_shift_counts = {}
+    for dimension in all_shift_changes.keys():
+        if len(all_shift_changes[dimension]) == 0:
+            max_shift_counts[dimension] = {0:0}
+            continue
+        shift_max_count = max(all_shift_changes[dimension], 
+                              key=all_shift_changes[dimension].get)
+        count_max_shift = all_shift_changes[dimension][shift_max_count]
+        max_shift_counts[dimension] = {shift_max_count:count_max_shift}
+    # x in the lambda function is the dimension
+    # lambda extracts the maximum value count for that dimension
+    max_shift_count_dimension = max(max_shift_counts, 
+                                    key= lambda x: list(max_shift_counts[x].values())[0])
+    # get dictionary with the shift change (not the count)
+    # for dimension where the count was not the maximum count, set
+    # the shift change to 0
+    shift_changes = {}
+    for dimension in all_shift_changes:
+        if dimension == max_shift_count_dimension:
+            max_shift_count_dim = max_shift_counts[dimension].keys()
+            shift_changes[dimension] = list(max_shift_count_dim)[0]
+            continue
+        shift_changes[dimension] = 0
+    return shift_changes
+
+def refine_shift_values(input_image,  shift_changes, best_correlation_value, 
+                        shift,  reference_image, 
+                        difference_in_stds,
+                        shifted_references, shifted_input_image_stats):
+    
+    refine_shift = {}
+    for dimension in shift_changes:
+        if shift_changes[dimension] == 0:
+            refine_shift[dimension] = False
+        else:
+            refine_shift[dimension] = True
+    
+    # reformat shift changes to contain an array for each dimension
+    # with shift changes that should be tested
+    shift_changes = {dim:[shift] for dim, shift in shift_changes.items()}
+
+    no_improvement_counter = {"x":0, "y":0, "z":0}
+    
+    # if the current image is an outlier (much worse correlation score)
+    # then use a higher distance to explore
+    if difference_in_stds > threshold_std_difference:
+        max_without_improvement = explorations_without_improvement_outlier
+    else:    
+        max_without_improvement = explorations_without_improvement
         
-        all_z_shifts = [shifts[2] for shifts in all_shifts]
+    # if there are no multiple slices in the z dimension
+    # z dimension does not need to be optimized
+    if input_image.shape[0] == 1:
+       no_improvement_counter["z"] = max_without_improvement
+       
+    # dimensions should now be ordered as they are order in the input_image
+    dimensions = ["z", "x", "y"]
+    a = 0
+    while refine_shift["x"] | refine_shift["y"] | refine_shift["z"]:
+        #save all x_shifts & y_shifts to be tested
+        shifts = {}
+        for dim_nb, dimension in enumerate(dimensions):
+            shifts[dimension] = []
+            # only add initial shift value for not refined dimensions
+            if not refine_shift[dimension]:
+                shifts[dimension].append(shift[dimension])
+                continue
+            # refining the dimension with shift change of 0 means
+            # that the shift change needs to be tested
+            for shift_change in shift_changes[dimension]:
+                if shift_change == 0:
+                    continue
+                new_shift = shift[dimension] + shift_change
+                # only add new shift, if it does not move out of the dimension
+                if abs(new_shift) >= (input_image.shape[dim_nb] - 2): 
+                    continue
+                shifts[dimension].append(new_shift)
+                
+            if len(shifts[dimension]) == 0:
+                no_improvement_counter[dimension] = max_without_improvement
+                shifts[dimension].append(shift[dimension])
+        best_shift = copy.copy(shift)
         
+        all_shifts = list(itertools.product(shifts["x"], 
+                                            shifts["y"], 
+                                            shifts["z"]))
+
         all_shifted_references = add_z_shifted_reference_images(reference_image, 
                                                                 shifted_references, 
-                                                                all_z_shifts)
+                                                                shifts["z"])
         shifted_input_image_stats = add_z_shifted_input_image_stats(input_image, 
                                                                     shifted_input_image_stats, 
-                                                                    all_z_shifts)
-       
+                                                                    shifts["z"])
         #test all combinations of x_shifts and y_shifts
         for x_shift_test, y_shift_test, z_shift_test in all_shifts:
             shifted_reference = all_shifted_references[z_shift_test]["image"]
             std_reference = all_shifted_references[z_shift_test]["std"]
             input_image_mean = shifted_input_image_stats[z_shift_test]["mean"]
             std_input_image = shifted_input_image_stats[z_shift_test]["std"]
+            
             #don't calculate correlation that was calculated already again
-            if ((x_shift_test == x_shift) & (y_shift_test == y_shift) &
-                 (z_shift_test == z_shift)):
+            if ((x_shift_test == shift["x"]) & (y_shift_test == shift["y"]) &
+                 (z_shift_test == shift["z"])):
                 continue
             correlation_value_test = calculate_correlation_value(input_image, 
                                                                  x_shift_test, 
@@ -887,30 +1040,63 @@ def refine_shift_values(input_image,
                 #update best correlation value
                 best_correlation_value = correlation_value_test
                 #save shifts for best correlation value in tmp vars
-                best_x_shift = x_shift_test
-                best_y_shift = y_shift_test
-                best_z_shift = z_shift_test
+                best_shift["x"] = x_shift_test
+                best_shift["y"] = y_shift_test
+                best_shift["z"] = z_shift_test
 
-        # if best x_shift / y_shift were not changed, 
+        # if best shift were not changed, 
         # then don't refine it further otherwise update the shifts
-        if best_x_shift == x_shift:
-            refine_x_shift = False
-        else:
-            x_shift = best_x_shift
+        # when one dimension is refined, go through the others x -> y -> z
+        # always refine only one dimension at a time
+        # reiterate until there was no improvement in any dimension
+        dimension_order_map = {"x":"y", "y":"z", "z":"x"}
+        for dimension in best_shift:
+            next_dimension = dimension_order_map[dimension]
+            if not refine_shift[dimension]:
+                continue
+            if best_shift[dimension] == shift[dimension]:
+                no_improvement_counter[dimension] += 1
+                if no_improvement_counter[dimension] >= max_without_improvement:
+                    refine_shift[dimension] = False
+                    refine_shift[next_dimension] = True
+                    shift_changes[dimension] = [0]
+                    shift_changes[next_dimension] = [-1, 1]
+                    break
+                elif no_improvement_counter[dimension] < max_without_improvement:
+                    if len(shift_changes[dimension]) > 1:
+                        # if there was no improvement, try larger shift changes
+                        # in both directions
+                        shift_changes[dimension][0] -= 1
+                        shift_changes[dimension][1] += 1
+                    elif shift_changes[dimension][0] < 0:
+                        # otherwise increase shift changes in the same direction more
+                        shift_changes[dimension][0] -= 1
+                    elif shift_changes[dimension][0] > 0:
+                        shift_changes[dimension][0] += 1
+            else:
+                # once there is one improvement, reset all counters
+                for counter_dimension in no_improvement_counter:
+                    no_improvement_counter[counter_dimension] = 0
+                # if there are still multiple shift changes that are tested
+                # set the direction now that an improvement was evident
+                # if the new shift was smaller than the original shift
+                # set the shift change to -1, otherwise to 1
+                # shift tests are then started from the new shift
+                if best_shift[dimension] < shift[dimension]:
+                    shift_changes[dimension] = [-1]
+                else:
+                    shift_changes[dimension] = [+1]
+                shift[dimension] = best_shift[dimension]
+                
+        # stop optimization if no improvements could be made in any dimension
+        min_no_improvement = np.min(list(no_improvement_counter.values()))
+        if min_no_improvement >= max_without_improvement:
+            return shift
+        
+    return shift
 
-        if best_y_shift == y_shift:
-            refine_y_shift = False
-        else:
-            y_shift = best_y_shift
-
-        if best_z_shift == z_shift:
-            refine_z_shift = False
-        else:
-            z_shift = best_z_shift
-            
-    return x_shift, y_shift, z_shift
-
-def get_initial_shift_refinings(best_correlation, step_size_shift):
+def get_initial_shift_refinings(best_correlation, step_size_shift,
+                                correlation_array_shape):
     """
     Check whether shift should be refined in each direction
     if best value was not +1 or -1 px, leave it as is
@@ -919,29 +1105,24 @@ def get_initial_shift_refinings(best_correlation, step_size_shift):
     if it was right in the array (higher shift)
     then the shift should be further increased
     """
-    if (best_correlation[0][0] == 0):
-        #reduce x_shift
-        x_shift_change = -1
-    elif (best_correlation[0][0] == (2 * step_size_shift)):
-        #increase x_shift
-        x_shift_change = 1
-    else:
-        x_shift_change = 0
+    shift_changes = {}
+    # add dimension in order they are present in the correlation_value_array
+    dimensions = ["x", "y", "z"]
+    for dim_nb, dimension in enumerate(dimensions):
+        # if only one value was tested for the current correlation array
+        # frame shift is 0 in any case
+        if (correlation_array_shape[dim_nb] == 1):
+            shift_changes[dimension] = 0
+        elif (best_correlation[dim_nb][0] == 0):
+            #reduce x_shift
+            shift_changes[dimension] = -1
+        elif (best_correlation[dim_nb][0] == (2 * step_size_shift[dimension])):
+            #increase x_shift
+            shift_changes[dimension] = 1
+        else:
+            shift_changes[dimension] = 0
 
-    if (best_correlation[1][0] == 0):
-        y_shift_change = -1
-    elif (best_correlation[1][0] == (2 * step_size_shift)):
-        y_shift_change = 1
-    else:
-        y_shift_change = 0
-        
-    if (best_correlation[2][0] == 0):
-        z_shift_change = -1
-    elif (best_correlation[2][0] == (2 * step_size_shift)):
-        z_shift_change = 1
-    else:
-        z_shift_change = 0
-    return x_shift_change, y_shift_change, z_shift_change
+    return shift_changes
 
 def translate_images(all_translations,image_array,image_name_array, 
                     outputFolder, channel, save_as_multipage=False):
@@ -1226,8 +1407,6 @@ def traverseFolders(input_path, folders, conditions, step_size_shift,max_shift,
     
 
 
-#expected shift needs to be at least 1
-step_size_shift = 3
 
 current_nb = 0
 
@@ -1238,7 +1417,7 @@ if choose_folder_manually:
     root = tkinter.Tk()
     root.withdraw()
 
-    collection_folder = filedialog.askdirectory(initialdir = collection_folder)
+    collection_folder = filedialog.askdirectory(initialdir = input_path)
     collection_folder = os.path.abspath(collection_folder)
 
     if os.path.exists(collection_folder):
