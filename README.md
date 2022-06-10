@@ -1,5 +1,6 @@
 # livecellreg
-Correlation-based registration of 2D &amp; 3D live cell imaging movies using translation of images. It also works quite well for cells with signals that change localization over time within the structure that should be registered - e.g. a signal that is moving within the cell. 
+Correlation-based registration of 2D &amp; 3D live cell imaging movies using translation of images. It also works quite well for cells with signals that change localization over time within the structure that should be registered - e.g. a signal that is moving within the cell.
+Only works with timelapse recording - input tif files must have multiple frames as set in ImageJ under Image -> Properties.
 
 Still needs a lot of refactoring. Will be converted into a locally installable package in June-July 2022.
 
