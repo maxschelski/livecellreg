@@ -47,16 +47,21 @@ input_path = "E:\\TUBB\\MT-RF_manipulation\\FRB-Dync1h1m-C2-TE-CAMS3\\"
 input_path = "E:\\TUBB\\MT-RF_manipulation\\LatA10-FRB-Dync1h1m-C2-TE\\"
 input_path = "C:\\Users\\Maxsc\\Documents\\data_tmp\\FRB-Dync1h1m-C2-TE-CAMS3\\"
 
-input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF13m-C2-CAMS3\\"
-input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF13aM-C2-Control-CAMS3\\"
-input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF1aM-C2-Control-CAMS3\\"
-input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF1aM-C2-CAMS3\\"
 input_path = "E:\\TUBB\\MT-RF_manipulation\\recruit-CAAX-control\\"
 input_path = "E:\\TUBB\\MT-RF_manipulation\\FRB-KIFC1-N593K-C2-CAMS3\\"
-input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV7-FRB-Dync1h1m-C2-TE-CAMS3\\"
 input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV5-FRB-Dync1h1m-C2-TE-CAMS3\\"
 input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV4-FRB-Dync1h1m-C2-TE-CAMS3\\"
 input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV10-FRB-Dync1h1m-C2-TE-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF1aM-C2-Control-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF1aM-C2-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF13m-C2-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\KIF-C2-CAMS3\\FRB-KIF13aM-C2-Control-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV7-FRB-Dync1h1m-C2-TE-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_treatment\\MT_orientation\\paBlebb-EB\\"
+
+input_path = "E:\\TUBB\\MT-RF_manipulation\\LatA-Dync1h1m-C2\\LatA10-FRB-Dync1h1m-C2-CAMS3\\"
+input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-TE-CAMS3\\FRB-Dync1h1m-C2-CAMS3-EB\\"
+input_path = "C:\\Users\\Maxsc\\Documents\\data_tmp\\FRB-Dync1h1m-C2-CAMS3-EB\\test"
 
 # input_path = "C:\\Users\\Maxsc\\Documents\\data_tmp\\slices\\211104\\registration\\test"
 
@@ -69,18 +74,33 @@ input_path = "E:\\TUBB\\MT-RF_manipulation\\Dync1h1m-C2-old_neurons\\old-DIV10-F
 #Choose the channel with an as much as possible non-changing intracellular localization
 #signals that accumulate at a certain place or are excluded from a from a place
 #over time are not going to work very well
-reference_channel = "c0000"
+reference_channel = "c0001"
 date = "2204"
 images_in_sorted_folder = False
 choose_folder_manually = False
 force_multipage_save = False
 only_register_multipage_tiffs = True
-overwrite_registered_images = False
+overwrite_registered_images = True
 
 # start the registration from the last frame
 # thereby the position of all frames 
 # will be similar to the position in the last frame
 start_reg_from_last_img = False
+
+
+# Option to only determine translation value for every xth image
+# developed to allow for registration of movies with two channels
+# that were imaged at different time intervals. If one channel is imaged 
+# much faster than the scale at which registration is necessary but another
+# channel is imaged much slowed, at the scale of drift, than the big drift 
+# between longer intervals might cause artificial drift in the first channel
+# too. Only needed if precision of registration is needed! 
+# (if a few px matter - e.g. for point tracking over a few px)
+# (e.g. channel one 6x every 1s for each cell and channel two
+# only once in that interval - this paradigm was used to repeatedly image
+# fast dynamics in channel one in multiple cells and the slower dynamics
+# in channel 2 only once for one loop over all cells)
+find_translation_from_every_xth_frame = 7
 
 
 # number of STD that the correlation value of an image with the last shift
@@ -94,8 +114,8 @@ threshold_std_difference = 4
 # minimum of correlation value difference from mean in multiples of std
 # for some conditions (e.g. live cell imaging in 3D with a bit of drift)
 # it's better to choose this smaller than threshold_std_difference
-threshold_std_for_new_reference = 3
-# alterantively to changing the threshold std for new reference
+threshold_std_for_new_reference = 2
+# alterantively/additionally to changing the threshold std for new reference
 # defining how often a new reference image is choosen can help
 # empirically found to be helpful for 3D stacks with more shift
 nb_images_until_new_reference = np.nan
@@ -105,12 +125,16 @@ outlier_std_difference = 10
 
 # the maximum multiple of stds above the mean of an image that is allowed
 # above that it will be cut to that multiple
-max_multiple_stds_above = 10
+# the less cytosolic a signal is (more concentrated at few points) and
+# even more importantly the more it changes its position, the smaller this
+# parameter should be. However, it should be checked how much the background
+# signal is above the average in STDs
+max_multiple_stds_above = 6
 
 # refining shift value
 # maximum number of testing new shift values without improvement
-explorations_without_improvement_outlier = 100#20
-explorations_without_improvement = 10
+explorations_without_improvement_outlier = 40#120
+explorations_without_improvement = 15
 
 
 # TODO FOR SPEEDING UP SCRIPT:
@@ -130,14 +154,14 @@ step_size_shift = 2
 # if correlation value cannot be brought below the threshold_std_difference,
 # this is an alternative rule to end initial optimization
 # number of times that the same shift value needs to be found 
-# to get the initial shift value, to finish this part
+# to get the initial shift value, to continue
 necessary_shift_count = 5
 
 # maximum shift in pixels which is allowed to get initial shift 
 # beyond this shift, the image will be replaced with a zero image
 # usually before max shift is triggered, enough shifts in the same direction
 # were found 
-max_shift = 150#20
+max_shift = 60#150
 # if no translation could be found within the allowed max shift
 # this happens e.g. if the position scan at the
 # microscope ended up at the wrong cell), replace images with zero image
@@ -495,6 +519,7 @@ def get_translations(input_image_array, step_size_shift, max_shift):
     # by only allowing a maximum multiple of stds above the mean
     # this is crucial for non cytosolic signals or in general signals that
     # change their localization during the movie
+    print( input_image_array.shape)
     image_means = np.mean(input_image_array,axis=(2,3), keepdims=True)
     image_stds = np.std(input_image_array, axis=(2,3), keepdims=True)
     new_images = input_image_array - image_means
@@ -502,6 +527,15 @@ def get_translations(input_image_array, step_size_shift, max_shift):
     new_images[new_images > max_multiple_stds_above] = max_multiple_stds_above
     new_images *= image_stds
     new_images += image_means
+    # if only every xth image should be used for finding the translation
+    if type(find_translation_from_every_xth_frame) != type(None):
+        nb_frames = new_images.shape[0]
+        frames = np.arange(0, nb_frames, 
+                           step=find_translation_from_every_xth_frame)
+        print( new_images.shape)
+        new_images = new_images[frames]
+        print( new_images.shape)
+        dasd
     input_image_array = new_images
 
     # save all correlation values with last shift
@@ -1205,6 +1239,8 @@ def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
     or cells saved as a single multi-channel tiff
     """
     for cell in os.listdir(exp_iteration_folder):
+        if cell.find(".tif") == -1:
+            continue
         cell_allowed = check_whether_file_name_is_allowed(cell,
                                                           file_name_inclusions,
                                                           file_name_exclusions)
@@ -1258,9 +1294,9 @@ def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
                      channels, 
                      meta_data) = extract_imgs_from_multipage(exp_iteration_folder, 
                                                               cell)
-
                     multi_page = True
-
+                    print("EXTRACT")
+                    
         if (current_nb % processes) == 0:
             current_nb = 0
         #independent of whether cell data is saved in folder structure
@@ -1275,17 +1311,18 @@ def translate_cells_in_folder(exp_iteration_folder, date, step_size_shift,
             #remove zero images
             #by selecting all timeframes comprised of a non zero image
             for nb, channel in enumerate(channels):
-                zero_frames_channels.append(np.all(image_arrays[nb] > 0, 
+                zero_frames_channels.append(np.all(image_arrays[nb] == 0, 
                                                    axis=(-3,-2,-1)))
             # make sure to only have one set of zero frames for all channels
             # otherwise channels will have different number of frames
             # remove all frames with a zero frame in at least one channel
             final_zero_frames = zero_frames_channels[0]
-            for zero_frames in zero_frames_channels[1:]:
-                final_zero_frames = final_zero_frames & zero_frames
-                
+            if len(zero_frames_channels) > 1:
+                for zero_frames in zero_frames_channels[1:]:
+                    final_zero_frames = final_zero_frames | zero_frames
+                    
             for nb, channel in enumerate(channels):
-                image_arrays[nb] = image_arrays[nb][final_zero_frames,:,:,:]
+                image_arrays[nb] = image_arrays[nb][~final_zero_frames,:,:,:]
             
         if remove_out_of_focus_images:
             for nb, channel in enumerate(channels):
